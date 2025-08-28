@@ -181,7 +181,6 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     xmin, xmax = min(xs), max(xs)
     dx = 0.05 * (xmax - xmin) if xmax > xmin else 1.0
     ax.set_xlim(xmin - dx, xmax + dx)
-    ax.set_ylim(100, max_tflops + 500)
 
     # roofline from operational intensity (identical across series)
     def plot_roofline(max_tflops, max_tbps, bw_label, comp_label):
@@ -200,7 +199,8 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
                 zorder=1)
 
     plot_roofline(peak_tflops[0], peak_tbps[0], "GPU", "GPU")
-    plot_roofline(blas_tflops[0], peak_tbps[0], "memset", "BLAS")
+    plot_roofline(blas_tflops[0], memset_tbps[0], "memset", "BLAS")
+    ax.set_ylim(100, max(peak_tflops[0], blas_tflops[0]) + 500)
 
     # Plot each series as a lineplot of TFLOP/s
     for idx, (pth, (_, f, b, t)) in enumerate(zip(series, perfs)):
