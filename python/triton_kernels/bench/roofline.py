@@ -153,10 +153,10 @@ def load_perf_csv(path):
             bytes.append(int(row["bytes"]))
             tval = row["time_ns"] if has_time_ns else row["time"]
             times.append(int(float(tval)))
-            peak_tflops.append(int(row["peak_tflops"]))
-            peak_tbps.append(int(row["peak_tbps"]))
-            blas_tflops.append(int(row["blas_tflops"]))
-            memset_tbps.append(int(row["memset_tbps"]))
+            peak_tflops.append(int(float(row["peak_tflops"])))
+            peak_tbps.append(int(float(row["peak_tbps"])))
+            blas_tflops.append(int(float(row["blas_tflops"])))
+            memset_tbps.append(int(float(row["memset_tbps"])))
     return xs, flops, bytes, times, peak_tflops, peak_tbps, blas_tflops, memset_tbps
 
 
