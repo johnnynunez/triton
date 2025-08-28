@@ -105,7 +105,7 @@ def roofline_mlp(batch_sizes, dim1, dim2, n_expts_tot, n_expts_act, x_dtype, w_d
 
     png_path = roofline.plot_roofline(series=[csv_path],  # roofline data to plot
                                       xlabel="batch_per_expt",
-                                      out_path=out_path.with_suffix(".png"),  # output path
+                                      out_path=out_path.with_suffix(".pdf"),  # output path
                                       max_tbps="memset", max_tflops="blas")  # hardware limits
 
     return png_path

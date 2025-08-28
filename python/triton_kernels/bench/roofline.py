@@ -202,9 +202,9 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
             x_bw = y_bw = []
         x_comp = xs[max(knee - 1, 0):]
         y_comp = [max_tflops] * len(x_comp)
-        ax.plot(x_bw, y_bw, linestyle="--", color=color, linewidth=3, alpha=0.8,
+        ax.plot(x_bw, y_bw, linestyle="--", color=color, linewidth=2, alpha=0.8,
                 label=f"BW-bound - {max_tbps:.1f} TB/s [{bw_label}]", zorder=1)
-        ax.plot(x_comp, y_comp, linestyle=":", color=color, linewidth=3, alpha=0.8,
+        ax.plot(x_comp, y_comp, linestyle=":", color=color, linewidth=2, alpha=0.8,
                 label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]", zorder=1)
 
     grey = "#757575"
@@ -219,7 +219,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
         perf_tflops = [ff / tt * 1e-3 if tt > 0 else 0.0 for ff, tt in zip(f, t)]
         label = (labels[idx] if labels and idx < len(labels) else Path(pth).stem)
         color = colors[idx % len(colors)]
-        ax.plot(xs, perf_tflops, label=label, linewidth=4, color=color, 
+        ax.plot(xs, perf_tflops, label=label, linewidth=2.5, color=color, 
                 linestyle="-", alpha=0.9, zorder=3)
 
     ax.legend(frameon=False, loc="lower right")
