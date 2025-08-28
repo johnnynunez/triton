@@ -174,16 +174,6 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     perfs = [load_perf_csv(p) for p in series]
     validate_perfs(perfs)
     xs, flops_ref, bytes_ref, _, peak_tflops, peak_tbps, blas_tflops, memset_tbps = perfs[0]
-    if not isinstance(max_tbps, int):
-        if max_tbps == "memset":
-            max_tbps = memset_tbps
-        else: 
-            max_tbps = peak_tbps
-    if not isinstance(max_tflops, int):
-        if max_tflops == "blas":
-            max_tflops = blas_tflops
-        else:
-            max_tflops = peak_tflops
     fig, ax = plt.subplots(figsize=(7, 5), dpi=120)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("performance [TFLOP/s]")
@@ -194,19 +184,23 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     ax.set_ylim(100, max_tflops + 500)
 
     # roofline from operational intensity (identical across series)
-    opints = [f / b for f, b in zip(flops_ref, bytes_ref)]
-    knee = bisect_left(opints, max_tflops / max_tbps)
-    if knee > 0:
-        x_bw = [xs[0], xs[knee - 1]]
-        y_bw = [opints[0] * max_tbps, max_tflops]
-    else:
-        x_bw = y_bw = []
-    x_comp = xs[max(knee - 1, 0):]
-    y_comp = [max_tflops] * len(x_comp)
-    grey = "#7f7f7f"
-    ax.plot(x_bw, y_bw, linestyle="--", color=grey, label=f"BW-bound - {max_tbps:.1f} TB/s [memset]", zorder=1)
-    ax.plot(x_comp, y_comp, linestyle=":", color=grey, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [BLAS]",
-            zorder=1)
+    def plot_roofline(max_tflops, max_tbps, bw_label, comp_label):
+        opints = [f / b for f, b in zip(flops_ref, bytes_ref)]
+        knee = bisect_left(opints, max_tflops / max_tbps)
+        if knee > 0:
+            x_bw = [xs[0], xs[knee - 1]]
+            y_bw = [opints[0] * max_tbps, max_tflops]
+        else:
+            x_bw = y_bw = []
+        x_comp = xs[max(knee - 1, 0):]
+        y_comp = [max_tflops] * len(x_comp)
+        grey = "#7f7f7f"
+        ax.plot(x_bw, y_bw, linestyle="--", color=grey, label=f"BW-bound - {max_tbps:.1f} TB/s [{bw_label}]", zorder=1)
+        ax.plot(x_comp, y_comp, linestyle=":", color=grey, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]",
+                zorder=1)
+
+    plot_roofline(peak_tflops[0], peak_tbps[0], "GPU", "GPU")
+    plot_roofline(blas_tflops[0], peak_tbps[0], "memset", "BLAS")
 
     # Plot each series as a lineplot of TFLOP/s
     for idx, (pth, (_, f, b, t)) in enumerate(zip(series, perfs)):
