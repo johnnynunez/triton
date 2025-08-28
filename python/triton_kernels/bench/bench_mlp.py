@@ -104,7 +104,7 @@ def roofline_mlp(batch_sizes, dim1, dim2, n_expts_tot, n_expts_act, x_dtype, w_d
                                          out_path=out_path.with_suffix(".csv"))  # output path
 
     png_path = roofline.plot_roofline(series=[csv_path],  # roofline data to plot
-                                      xlabel="batch_per_expt", title=out_path,  # plot options
+                                      xlabel="batch_per_expt",
                                       out_path=out_path.with_suffix(".png"),  # output path
                                       max_tbps="memset", max_tflops="blas")  # hardware limits
 
@@ -116,6 +116,7 @@ if __name__ == "__main__":
     batch_sizes_dense = [*range(128, 8192, 128)]
     batch_ranges_moe = [(2**(2 + k), 2**(3 + k), min(2**k, 32)) for k in range(8)]
     batch_sizes_moe = list(chain(*[range(*r) for r in batch_ranges_moe]))
+    batch_sizes_moe = [size for size in batch_sizes_moe]
     dense_dtypes = ["fp8", "fp8"]
     quantized_dtypes = ["fp8", "mx4"] if has_native_mx4 else ["bf16", "mx4"]
     rank, world_size = triton_dist.setup()

@@ -202,24 +202,25 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
             x_bw = y_bw = []
         x_comp = xs[max(knee - 1, 0):]
         y_comp = [max_tflops] * len(x_comp)
-        ax.plot(x_bw, y_bw, linestyle="--", color=color, label=f"BW-bound - {max_tbps:.1f} TB/s [{bw_label}]", zorder=1)
-        ax.plot(x_comp, y_comp, linestyle=":", color=color, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]",
-                zorder=1)
+        ax.plot(x_bw, y_bw, linestyle="--", color=color, linewidth=3, alpha=0.8,
+                label=f"BW-bound - {max_tbps:.1f} TB/s [{bw_label}]", zorder=1)
+        ax.plot(x_comp, y_comp, linestyle=":", color=color, linewidth=3, alpha=0.8,
+                label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]", zorder=1)
 
-    grey = "#9e9e9e"
+    grey = "#757575"
     plot_roofline(peak_tflops[0], peak_tbps[0], "GPU", "GPU", color=grey)
-    red = "#d32f2f"
+    red = "#e53935"
     plot_roofline(blas_tflops[0], memset_tbps[0], "memset", "BLAS", color=red)
     ax.set_ylim(100, max(peak_tflops[0], blas_tflops[0]) + 500)
 
-    # Plot each series as a lineplot of TFLOP/s
-    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
+    # Plot each series as a lineplot of TFLOP/s with improved styling
+    colors = ["#1e88e5", "#ff8f00", "#43a047", "#e53935", "#8e24aa", "#6d4c41", "#d81b60", "#546e7a"]
     for idx, (pth, (_, f, b, t, _, _, _, _)) in enumerate(zip(series, perfs)):
         perf_tflops = [ff / tt * 1e-3 if tt > 0 else 0.0 for ff, tt in zip(f, t)]
         label = (labels[idx] if labels and idx < len(labels) else Path(pth).stem)
         color = colors[idx % len(colors)]
-        ax.plot(xs, perf_tflops, label=label, linewidth=2.5, color=color, 
-                linestyle="-", markersize=4, zorder=2)
+        ax.plot(xs, perf_tflops, label=label, linewidth=4, color=color, 
+                linestyle="-", alpha=0.9, zorder=3)
 
     ax.legend(frameon=False, loc="lower right")
     ax.grid(True, which="both", ls=":", lw=0.5)
