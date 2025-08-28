@@ -120,7 +120,7 @@ def get_cublas_tflops(dtype):
 
 # Load CSV series: expect columns x, flops, bytes, time_ns (or time)
 def load_perf_csv(path):
-    xs, flops, bytes_, times = [], [], [], []
+    xs, flops, bytes, times = [], [], [], []
     with open(path, "r", newline="") as f:
         reader = csv.DictReader(f)
         # Support both time_ns and time as column names
@@ -131,10 +131,10 @@ def load_perf_csv(path):
         for row in reader:
             xs.append(int(row["x"]))
             flops.append(int(row["flops"]))
-            bytes_.append(int(row["bytes"]))
+            bytes.append(int(row["bytes"]))
             tval = row["time_ns"] if has_time_ns else row["time"]
             times.append(int(float(tval)))
-    return xs, flops, bytes_, times
+    return xs, flops, bytes, times
 
 
 def validate_perfs(perfs):
@@ -191,6 +191,31 @@ def plot_roofline(series, flops_dtype, out_path, max_tbps, max_tflops, title="",
     ax.grid(True, which="both", ls=":", lw=0.5)
     fig.tight_layout()
     plt.savefig(out_path)
+
+
+def load_imbalance(out_path, world_size):
+    rank_tf = []
+    rank_xs = []
+    for i in range(world_size):
+        rank_path = out_path if world_size == 1 else out_path / f"rank{i}"
+        csv_path = rank_path.with_suffix(".csv")
+        if not csv_path.exists():
+            print(f"Warning: {csv_path} does not exist, skipping load balance check")
+            continue
+        xs, flops, bytes, times = load_perf_csv(csv_path)
+        tf = [f / t / 1e12 if t > 0 else 0.0 for f, t in zip(flops, times)]
+        rank_tf.append(tf)
+        rank_xs.append(xs)
+
+    for i in range(len(rank_xs[0])):
+        xs = rank_xs[0][i]
+        tf = [rank_tf[r][i] for r in range(world_size)]
+        min_tf = min(tf)
+        max_tf = max(tf)
+        load_imbalance = (max_tf - min_tf) / max_tf if max_tf > 0 else 0.0
+        print(
+            f"x: {xs:5d} | min TFLOPS: {min_tf:#.4g} | max TFLOPS: {max_tf:#.4g} | load imbalance: {load_imbalance:.2%}"
+        )
 
 
 if __name__ == "__main__":

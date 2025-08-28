@@ -56,13 +56,10 @@ def setup() -> Tuple[int, int]:
         torch.cuda.set_device(local_rank)
     return local_rank, world_size
 
-
 def cleanup():
     if _is_distributed_launch():
         dist.barrier()
         dist.destroy_process_group()
-    else:
-        pass
 
 
 def broadcast(x: torch.Tensor, src: int = 0, groups: list = None, group_idx: int = None) -> torch.Tensor:
