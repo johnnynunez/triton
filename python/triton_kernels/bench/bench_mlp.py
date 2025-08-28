@@ -88,7 +88,7 @@ def bench_mlp(batch_per_expt, dim1, dim2, n_expts_tot, n_expts_act, x_dtype, w_d
                            precision_config=pc2)
         x = triton_dist.reduce_scatter(x, metadata=metadata, dim=0)
     proton.finalize()
-    return roofline.parse_profile(fpath.with_suffix(".hatchet"), useful_op_regex=".*matmul.*")
+    return roofline.parse_profile(fpath.with_suffix(".hatchet"), flops_dtype=x_dtype, useful_op_regex=".*matmul.*")
 
 
 def roofline_mlp(batch_sizes, dim1, dim2, n_expts_tot, n_expts_act, x_dtype, w_dtype, TP, EP, \
@@ -100,12 +100,13 @@ def roofline_mlp(batch_sizes, dim1, dim2, n_expts_tot, n_expts_act, x_dtype, w_d
                                          intensity_proxy_name="batch_per_expt",  # intensity proxy name
                                          intensity_proxy_values=batch_sizes,  # intensity proxy values to sweep
                                          verbose=verbose,  # options
+                                         flops_dtype=x_dtype,  # dtype to use for FLOPS roof
                                          out_path=out_path.with_suffix(".csv"))  # output path
+
     png_path = roofline.plot_roofline(series=[csv_path],  # roofline data to plot
-                                      flops_dtype=x_dtype,  # dtype to use for FLOPS roof
-                                      xlabel="batch_per_expt", title=out_path,  # plot option
+                                      xlabel="batch_per_expt", title=out_path,  # plot options
                                       out_path=out_path.with_suffix(".png"),  # output path
-                                      max_tbps="memset", max_tflops="cublas")  # hardware limits
+                                      max_tbps="memset", max_tflops="blas")  # hardware limits
 
     return png_path
 

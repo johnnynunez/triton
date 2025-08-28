@@ -2,6 +2,7 @@ import ctypes
 import matplotlib.pyplot as plt
 import triton
 from triton._C.libtriton import nvidia
+from triton_kernels.target_info import is_cuda
 import torch
 import csv
 from dataclasses import dataclass
@@ -13,14 +14,18 @@ class PerfRecord:
     time_ns: float
     flops: float
     bytes: float
+    peak_tflops: float
+    peak_tbps: float
 
 
-def parse_profile(profile_path, useful_op_regex):
+def parse_profile(profile_path, flops_dtype: torch.dtype, useful_op_regex: str):
     """
     construct a PerfRecord from a (proton) profile path and a regex for useful operations
     """
     from triton.profiler import viewer
-    gf, _, _, _ = viewer.read(profile_path)
+    from triton.profiler import specs
+
+    gf, _, _, info = viewer.read(profile_path)
     # aggregate "useful" flops + bytes
     useful = gf.filter(f"MATCH ('*', c) WHERE c.'name' =~ '{useful_op_regex}' AND c IS LEAF").dataframe
     bytes = int(useful["bytes"].sum())
@@ -28,58 +33,20 @@ def parse_profile(profile_path, useful_op_regex):
     # take all ops (incl. "not useful" ones) when computing total time
     allops = gf.filter("MATCH ('*', c) WHERE c IS LEAF").dataframe
     time_ns = allops["time (ns)"].sum()
-    return PerfRecord(time_ns=time_ns, flops=flops, bytes=bytes)
+    # get device info to calculate hardware limits
+    device_type = useful["device_type"].iloc[0]
+    device_id = useful["device_id"].iloc[0]
+    device_info = info[device_type][device_id]
+    peak_tflops = specs.max_flops(
+        device_type, device_info["arch"], flops_dtype.itemsize * 8, device_info["num_sms"], device_info["clock_rate"]
+    )
+    peak_tbps = specs.max_bps(
+        device_type, device_info["arch"], device_info["bus_width"], device_info["memory_clock_rate"]
+    )
+    return PerfRecord(time_ns=time_ns, flops=flops, bytes=bytes, peak_tflops=peak_tflops, peak_tbps=peak_tbps)
 
 
 # -- compute roofline --
-
-
-def write_csv(xs, perfs, fpath):
-    csv_path = fpath.with_suffix(".csv")
-    with csv_path.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["x", "flops", "bytes", "time_ns"])
-        for x, p in zip(xs, perfs):
-            writer.writerow([x, p.flops, p.bytes, p.time_ns])
-    return csv_path
-
-def compute_roofline(*args, \
-                  bench_fn, intensity_proxy_name, intensity_proxy_values, out_path, verbose, \
-                  **kwargs):
-    # validate input args
-    if not isinstance(intensity_proxy_name, str):
-        raise TypeError("intensity_proxy must be a string naming a parameter in target_fn")
-    # determine position of intensity_proxy in target_fn signature
-    sig = inspect.signature(bench_fn)
-    params = list(sig.parameters.values())
-    if intensity_proxy_name not in sig.parameters:
-        raise ValueError(f"Parameter '{intensity_proxy_name}' not found in {bench_fn.__name__} signature")
-    pos_index = [p.name for p in params].index(intensity_proxy_name)
-
-    # wrapper to inject intensity proxy into target_fn and call it
-    def inject_proxy_and_call(val, args, kwargs):
-        args_list = list(args)
-        args_list.insert(pos_index, val)
-        return bench_fn(*args_list, **kwargs)
-
-    # collect performance data
-    perfs = []
-    if verbose:
-        print("=========================================")
-        print(f"{out_path   }...")
-        print("=========================================")
-    for val in intensity_proxy_values:
-        perf = inject_proxy_and_call(val, args, kwargs)
-        perfs.append(perf)
-        if verbose:
-            tflops = perfs[-1].flops / perfs[-1].time_ns * 1e-3
-            tbps = perfs[-1].bytes / perfs[-1].time_ns * 1e-3
-            print(f"{intensity_proxy_name}: {val:5d} | TFLOPS: {tflops:#.4g} | TBPS: {tbps:.2f}")
-    # write to csv
-    return write_csv(intensity_proxy_values, perfs, out_path)
-
-
-# -- plot roofline --
 
 
 def get_memset_tbps():
@@ -118,9 +85,61 @@ def get_cublas_tflops(dtype):
     return 2 * M * N * K / time_ms * 1e-9
 
 
+def write_csv(xs, perfs, blas_tflops, memset_tbps, fpath):
+    csv_path = fpath.with_suffix(".csv")
+    with csv_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["x", "flops", "bytes", "time_ns", "peak_tflops", "peak_tbps", "blas_tflops", "memset_tbps"])
+        for x, p in zip(xs, perfs):
+            writer.writerow([x, p.flops, p.bytes, p.time_ns, p.peak_tflops, p.peak_tbps, blas_tflops, memset_tbps])
+    return csv_path
+
+
+def compute_roofline(*args, bench_fn, intensity_proxy_name, intensity_proxy_values, flops_dtype, out_path, verbose, **kwargs):
+    # validate input args
+    if not isinstance(intensity_proxy_name, str):
+        raise TypeError("intensity_proxy must be a string naming a parameter in target_fn")
+    # determine position of intensity_proxy in target_fn signature
+    sig = inspect.signature(bench_fn)
+    params = list(sig.parameters.values())
+    if intensity_proxy_name not in sig.parameters:
+        raise ValueError(f"Parameter '{intensity_proxy_name}' not found in {bench_fn.__name__} signature")
+    pos_index = [p.name for p in params].index(intensity_proxy_name)
+
+    # wrapper to inject intensity proxy into target_fn and call it
+    def inject_proxy_and_call(val, args, kwargs):
+        args_list = list(args)
+        args_list.insert(pos_index, val)
+        return bench_fn(*args_list, **kwargs)
+
+    # collect performance data
+    perfs = []
+    if verbose:
+        print("=========================================")
+        print(f"{out_path   }...")
+        print("=========================================")
+    for val in intensity_proxy_values:
+        perf = inject_proxy_and_call(val, args, kwargs)
+        perfs.append(perf)
+        if verbose:
+            tflops = perfs[-1].flops / perfs[-1].time_ns * 1e-3
+            tbps = perfs[-1].bytes / perfs[-1].time_ns * 1e-3
+            print(f"{intensity_proxy_name}: {val:5d} | TFLOPS: {tflops:#.4g} | TBPS: {tbps:.2f}")
+    if is_cuda():
+        blas_tflops = get_cublas_tflops(flops_dtype)
+        memset_tbps = get_memset_tbps()
+    else:
+        blas_tflops = 0
+        memset_tbps = 0
+    # write to csv
+    return write_csv(intensity_proxy_values, perfs, blas_tflops, memset_tbps, out_path)
+
+
+# -- plot roofline --
+
 # Load CSV series: expect columns x, flops, bytes, time_ns (or time)
 def load_perf_csv(path):
-    xs, flops, bytes_, times = [], [], [], []
+    xs, flops, bytes, times, peak_tflops, peak_tbps, blas_tflops, memset_tbps = [], [], [], [], [], [], [], []
     with open(path, "r", newline="") as f:
         reader = csv.DictReader(f)
         # Support both time_ns and time as column names
@@ -131,10 +150,14 @@ def load_perf_csv(path):
         for row in reader:
             xs.append(int(row["x"]))
             flops.append(int(row["flops"]))
-            bytes_.append(int(row["bytes"]))
+            bytes.append(int(row["bytes"]))
             tval = row["time_ns"] if has_time_ns else row["time"]
             times.append(int(float(tval)))
-    return xs, flops, bytes_, times
+            peak_tflops.append(int(row["peak_tflops"]))
+            peak_tbps.append(int(row["peak_tbps"]))
+            blas_tflops.append(int(row["blas_tflops"]))
+            memset_tbps.append(int(row["memset_tbps"]))
+    return xs, flops, bytes, times, peak_tflops, peak_tbps, blas_tflops, memset_tbps
 
 
 def validate_perfs(perfs):
@@ -145,21 +168,25 @@ def validate_perfs(perfs):
                 raise ValueError(f"x mismatch between series[0] and series[{i}]")
 
 
-def plot_roofline(series, flops_dtype, out_path, max_tbps, max_tflops, title="", xlabel="", labels=None):
+def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", labels=None):
     from bisect import bisect_left
     from pathlib import Path
     perfs = [load_perf_csv(p) for p in series]
     validate_perfs(perfs)
-    xs, flops_ref, bytes_ref, _ = perfs[0]
+    xs, flops_ref, bytes_ref, peak_tflops, peak_tbps, blas_tflops, memset_tbps = perfs[0]
     if not isinstance(max_tbps, int):
-        assert max_tbps == "memset"
-        max_tbps = get_memset_tbps()
+        if max_tbps == "memset":
+            max_tbps = memset_tbps
+        else: 
+            max_tbps = peak_tbps
     if not isinstance(max_tflops, int):
-        assert max_tflops == "cublas"
-        max_tflops = get_cublas_tflops(flops_dtype)
+        if max_tflops == "blas":
+            max_tflops = blas_tflops
+        else:
+            max_tflops = peak_tbps
     fig, ax = plt.subplots(figsize=(7, 5), dpi=120)
     ax.set_xlabel(xlabel)
-    ax.set_ylabel("performance  [TFLOP/s]")
+    ax.set_ylabel("performance [TFLOP/s]")
     ax.set_title(title)
     xmin, xmax = min(xs), max(xs)
     dx = 0.05 * (xmax - xmin) if xmax > xmin else 1.0
