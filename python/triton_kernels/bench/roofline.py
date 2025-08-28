@@ -205,7 +205,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     y_comp = [max_tflops] * len(x_comp)
     grey = "#7f7f7f"
     ax.plot(x_bw, y_bw, linestyle="--", color=grey, label=f"BW-bound - {max_tbps:.1f} TB/s [memset]", zorder=1)
-    ax.plot(x_comp, y_comp, linestyle=":", color=grey, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [cuBLAS]",
+    ax.plot(x_comp, y_comp, linestyle=":", color=grey, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [BLAS]",
             zorder=1)
 
     # Plot each series as a lineplot of TFLOP/s
