@@ -72,6 +72,15 @@ def get_memset_tbps():
     return tbps
 
 
+def get_torch_tbps():
+    n_bytes = 1 << 32
+    buf = torch.empty(n_bytes, device="cuda", dtype=torch.uint8)
+    fn = lambda: buf.zero_()
+    time_ms = triton.testing.do_bench(fn, rep=1000)
+    tbps = (n_bytes / (time_ms * 1e-3)) * 1e-12
+    return tbps
+
+
 def get_cublas_tflops(dtype):
     dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp8": torch.float8_e4m3fn}[dtype]
     cublas_workspace = torch.empty(32 * 1024 * 1024, device="cuda", dtype=torch.uint8)
@@ -130,7 +139,7 @@ def compute_roofline(*args, bench_fn, intensity_proxy_name, intensity_proxy_valu
         memset_tbps = get_memset_tbps()
     else:
         blas_tflops = 0
-        memset_tbps = 0
+        memset_tbps = get_torch_tbps()
     # write to csv
     return write_csv(intensity_proxy_values, perfs, blas_tflops, memset_tbps, out_path)
 
@@ -154,9 +163,9 @@ def load_perf_csv(path):
             tval = row["time_ns"] if has_time_ns else row["time"]
             times.append(int(float(tval)))
             peak_tflops.append(int(float(row["peak_tflops"])))
-            peak_tbps.append(int(float(row["peak_tbps"])))
+            peak_tbps.append(float(row["peak_tbps"]))
             blas_tflops.append(int(float(row["blas_tflops"])))
-            memset_tbps.append(int(float(row["memset_tbps"])))
+            memset_tbps.append(float(row["memset_tbps"]))
     return xs, flops, bytes, times, peak_tflops, peak_tbps, blas_tflops, memset_tbps
 
 
@@ -219,8 +228,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot roofline(s) from perf CSV series")
     parser.add_argument("--series", type=str, nargs="+", required=True,
                         help="list of .csv files; columns must be `x`, `flops`, `bytes`, `time_ns`")
-    parser.add_argument("--dtype", type=str, required=True, choices=["fp16", "bf16", "fp8"],
-                        help="data type used for compute-bound roof")
     parser.add_argument("--out_path", type=str, required=True, help="path to write the output image")
     parser.add_argument("--title", type=str, default="", help="plot title")
     parser.add_argument("--xlabel", type=str, default="", help="x-axis label")
@@ -229,4 +236,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.labels is not None and len(args.labels) != len(args.series):
         parser.error("--labels must have the same number of entries as --series")
-    plot_roofline(args.series, args.dtype, args.out_path, title=args.title, xlabel=args.xlabel, labels=args.labels)
+    plot_roofline(args.series, args.out_path, title=args.title, xlabel=args.xlabel, labels=args.labels)
