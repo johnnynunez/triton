@@ -192,7 +192,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     ax.set_xlim(xmin - dx, xmax + dx)
 
     # roofline from operational intensity (identical across series)
-    def plot_roofline(max_tflops, max_tbps, bw_label, comp_label):
+    def plot_roofline(max_tflops, max_tbps, bw_label, comp_label, color):
         opints = [f / b for f, b in zip(flops_ref, bytes_ref)]
         knee = bisect_left(opints, max_tflops / max_tbps)
         if knee > 0:
@@ -202,20 +202,24 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
             x_bw = y_bw = []
         x_comp = xs[max(knee - 1, 0):]
         y_comp = [max_tflops] * len(x_comp)
-        grey = "#7f7f7f"
-        ax.plot(x_bw, y_bw, linestyle="--", color=grey, label=f"BW-bound - {max_tbps:.1f} TB/s [{bw_label}]", zorder=1)
-        ax.plot(x_comp, y_comp, linestyle=":", color=grey, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]",
+        ax.plot(x_bw, y_bw, linestyle="--", color=color, label=f"BW-bound - {max_tbps:.1f} TB/s [{bw_label}]", zorder=1)
+        ax.plot(x_comp, y_comp, linestyle=":", color=color, label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]",
                 zorder=1)
 
-    plot_roofline(peak_tflops[0], peak_tbps[0], "GPU", "GPU")
-    plot_roofline(blas_tflops[0], memset_tbps[0], "memset", "BLAS")
+    grey = "#9e9e9e"
+    plot_roofline(peak_tflops[0], peak_tbps[0], "GPU", "GPU", color=grey)
+    red = "#d32f2f"
+    plot_roofline(blas_tflops[0], memset_tbps[0], "memset", "BLAS", color=red)
     ax.set_ylim(100, max(peak_tflops[0], blas_tflops[0]) + 500)
 
     # Plot each series as a lineplot of TFLOP/s
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"]
     for idx, (pth, (_, f, b, t, _, _, _, _)) in enumerate(zip(series, perfs)):
         perf_tflops = [ff / tt * 1e-3 if tt > 0 else 0.0 for ff, tt in zip(f, t)]
         label = (labels[idx] if labels and idx < len(labels) else Path(pth).stem)
-        ax.plot(xs, perf_tflops, label=label, linewidth=1.8, zorder=2)
+        color = colors[idx % len(colors)]
+        ax.plot(xs, perf_tflops, label=label, linewidth=2.5, color=color, 
+                linestyle="-", markersize=4, zorder=2)
 
     ax.legend(frameon=False, loc="lower right")
     ax.grid(True, which="both", ls=":", lw=0.5)
