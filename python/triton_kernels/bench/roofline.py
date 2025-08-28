@@ -173,7 +173,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     from pathlib import Path
     perfs = [load_perf_csv(p) for p in series]
     validate_perfs(perfs)
-    xs, flops_ref, bytes_ref, peak_tflops, peak_tbps, blas_tflops, memset_tbps = perfs[0]
+    xs, flops_ref, bytes_ref, _, peak_tflops, peak_tbps, blas_tflops, memset_tbps = perfs[0]
     if not isinstance(max_tbps, int):
         if max_tbps == "memset":
             max_tbps = memset_tbps
@@ -183,7 +183,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
         if max_tflops == "blas":
             max_tflops = blas_tflops
         else:
-            max_tflops = peak_tbps
+            max_tflops = peak_tflops
     fig, ax = plt.subplots(figsize=(7, 5), dpi=120)
     ax.set_xlabel(xlabel)
     ax.set_ylabel("performance [TFLOP/s]")
