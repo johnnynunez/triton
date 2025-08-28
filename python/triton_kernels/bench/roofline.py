@@ -203,7 +203,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
     ax.set_ylim(100, max(peak_tflops[0], blas_tflops[0]) + 500)
 
     # Plot each series as a lineplot of TFLOP/s
-    for idx, (pth, (_, f, b, t)) in enumerate(zip(series, perfs)):
+    for idx, (pth, (_, f, b, t, _, _, _, _)) in enumerate(zip(series, perfs)):
         perf_tflops = [ff / tt * 1e-3 if tt > 0 else 0.0 for ff, tt in zip(f, t)]
         label = (labels[idx] if labels and idx < len(labels) else Path(pth).stem)
         ax.plot(xs, perf_tflops, label=label, linewidth=1.8, zorder=2)
