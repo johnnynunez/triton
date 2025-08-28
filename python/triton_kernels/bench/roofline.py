@@ -161,10 +161,10 @@ def load_perf_csv(path):
 
 
 def validate_perfs(perfs):
-    xs_ref, flops_ref, bytes_ref, _ = perfs[0]
-    for _, (xs, flops, bytes, _) in enumerate(perfs[1:], start=1):
-        for i in range(len(xs)):
-            if xs[i] != xs_ref[i]:
+    xs_ref = perfs[0][0]
+    for i in range(1, len(perfs)):
+        for xs in enumerate(perfs[i][0]):
+            if xs != xs_ref[i]:
                 raise ValueError(f"x mismatch between series[0] and series[{i}]")
 
 
