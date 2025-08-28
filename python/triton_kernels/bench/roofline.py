@@ -138,7 +138,7 @@ def compute_roofline(*args, bench_fn, intensity_proxy_name, intensity_proxy_valu
         blas_tflops = get_cublas_tflops(flops_dtype)
         memset_tbps = get_memset_tbps()
     else:
-        blas_tflops = 0
+        blas_tflops = 1189
         memset_tbps = get_torch_tbps()
     # write to csv
     return write_csv(intensity_proxy_values, perfs, blas_tflops, memset_tbps, out_path)
