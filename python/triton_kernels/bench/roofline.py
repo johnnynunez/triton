@@ -39,10 +39,10 @@ def parse_profile(profile_path, flops_dtype: torch.dtype, useful_op_regex: str):
     device_info = info[device_type][device_id]
     peak_tflops = specs.max_flops(
         device_type, device_info["arch"], flops_dtype.itemsize * 8, device_info["num_sms"], device_info["clock_rate"]
-    )
+    ) / 1e12
     peak_tbps = specs.max_bps(
         device_type, device_info["arch"], device_info["bus_width"], device_info["memory_clock_rate"]
-    )
+    ) / 1e12
     return PerfRecord(time_ns=time_ns, flops=flops, bytes=bytes, peak_tflops=peak_tflops, peak_tbps=peak_tbps)
 
 
