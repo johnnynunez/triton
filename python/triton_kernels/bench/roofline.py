@@ -138,7 +138,7 @@ def compute_roofline(*args, bench_fn, intensity_proxy_name, intensity_proxy_valu
         blas_tflops = get_cublas_tflops(flops_dtype)
         memset_tbps = get_memset_tbps()
     else:
-        blas_tflops = 1189
+        blas_tflops = 1174
         memset_tbps = get_torch_tbps()
     # write to csv
     return write_csv(intensity_proxy_values, perfs, blas_tflops, memset_tbps, out_path)
@@ -207,6 +207,13 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
         ax.plot(x_comp, y_comp, linestyle=":", color=color, linewidth=2, alpha=0.8,
                 label=f"Compute-bound  - {max_tflops:.0f} TFLOP/s [{comp_label}]", zorder=1)
 
+    # Increase font sizes
+    plt.rcParams.update({'font.size': 24})
+    ax.tick_params(labelsize=20)
+    ax.set_xlabel(xlabel, fontsize=24)
+    ax.set_ylabel("performance [TFLOP/s]", fontsize=24)
+    ax.set_title(title, fontsize=28)
+
     grey = "#757575"
     plot_roofline(peak_tflops[0], peak_tbps[0], "GPU", "GPU", color=grey)
     red = "#e53935"
@@ -222,7 +229,7 @@ def plot_roofline(series, out_path, max_tbps, max_tflops, title="", xlabel="", l
         ax.plot(xs, perf_tflops, label=label, linewidth=2.5, color=color, 
                 linestyle="-", alpha=0.9, zorder=3)
 
-    ax.legend(frameon=False, loc="lower right")
+    ax.legend(frameon=False, loc="lower right", fontsize=18)
     ax.grid(True, which="both", ls=":", lw=0.5)
     fig.tight_layout()
     plt.savefig(out_path)
