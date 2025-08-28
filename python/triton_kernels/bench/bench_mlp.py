@@ -116,7 +116,7 @@ if __name__ == "__main__":
     batch_sizes_dense = [*range(128, 8192, 128)]
     batch_ranges_moe = [(2**(2 + k), 2**(3 + k), min(2**k, 32)) for k in range(8)]
     batch_sizes_moe = list(chain(*[range(*r) for r in batch_ranges_moe]))
-    batch_sizes_moe = [size for size in batch_sizes_moe]
+    batch_sizes_moe = [size for size in batch_sizes_moe if size < 800]
     dense_dtypes = ["fp8", "fp8"]
     quantized_dtypes = ["fp8", "mx4"] if has_native_mx4 else ["bf16", "mx4"]
     rank, world_size = triton_dist.setup()
