@@ -583,7 +583,7 @@ def _attn_fwd_load(config, chnls, descs, M, STAGE: gl.constexpr):
             issue_async_tma_load(k_smem, k_bar, desc_k, offsetkv_y)
             v_smem, v_bar, kv_producer = kv_producer.acquire()
             issue_async_tma_load(v_smem, v_bar, desc_v, offsetkv_y)
-    pl.exit_scope()
+    pl.exit_scope("_attn_fwd_load")
 
 
 @gluon.jit
@@ -653,7 +653,7 @@ def _attn_fwd_mma(config, chnls, descs, M, STAGE: gl.constexpr):
             s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
             p1_tmem = _borrow_s_as_p(config, s1_tmem)
             tcgen05_mma(p1_tmem, v_smem, o1_tmem, use_acc=o1_init, mbarriers=[o1_bar, v_bar, s0_bar, s1_bar])
-    pl.exit_scope()
+    pl.exit_scope("_attn_fwd_store")
 
 
 @gluon.jit
@@ -864,7 +864,7 @@ def _attn_fwd_epilogue(config, chnls, descs, M, STAGE: gl.constexpr):
         tma.store_wait(0)
         pl.exit_scope("copy_o1")
         mbarrier.arrive(o1_bar, count=1)
-    pl.exit_scope()
+    pl.exit_scope("_attn_fwd_epilogue")
 
 
 @gluon.jit
