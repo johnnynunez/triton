@@ -1111,10 +1111,10 @@ def test_op(Z, H, N_CTX, HEAD_DIM, causal, dtype, profile=False):
 
 BATCH = [4]
 N_HEADS = [32]
-HEAD_DIM = [64, 128]
-causal = [False, True]
-providers = ["triton-fp16", "triton-fp8"]
-N_CTX = [2**i for i in range(10, 17)]
+HEAD_DIM = [64]
+causal = [True]
+providers = ["triton-fp8"]
+N_CTX = [2**i for i in range(16, 17)]
 
 bench_configs = []
 for Z, H, D, is_causal in itertools.product(BATCH, N_HEADS, HEAD_DIM, causal):
