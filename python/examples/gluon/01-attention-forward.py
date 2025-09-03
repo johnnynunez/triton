@@ -653,7 +653,7 @@ def _attn_fwd_mma(config, chnls, descs, M, STAGE: gl.constexpr):
             s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
             p1_tmem = _borrow_s_as_p(config, s1_tmem)
             tcgen05_mma(p1_tmem, v_smem, o1_tmem, use_acc=o1_init, mbarriers=[o1_bar, v_bar, s0_bar, s1_bar])
-    pl.exit_scope("_attn_fwd_store")
+    pl.exit_scope("_attn_fwd_mma")
 
 
 @gluon.jit
