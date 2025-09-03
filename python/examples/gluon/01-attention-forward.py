@@ -1169,7 +1169,12 @@ def bench(Z, H, N_CTX, HEAD_DIM, causal, provider):
         total_flops = 2 * flops_per_matmul
         if causal:
             total_flops *= 0.5
-        return total_flops * 1e-12 / (ms * 1e-3)
+        ret = total_flops * 1e-12 / (ms * 1e-3)
+
+    proton.start("profile", backend="instrumentation")
+    attention_forward(q, k, v, causal, sm_scale)
+    proton.finalize()
+    return ret
 
 
 if __name__ == "__main__":
