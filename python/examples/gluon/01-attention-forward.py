@@ -562,27 +562,32 @@ def _attn_fwd_load(config, chnls, descs, M, STAGE: gl.constexpr):
         prog = scheduler.get_program(pid)
         lo, hi = prog.get_fused_loop_bounds(STAGE)
 
-        q0_offset = prog.qo_offset_y + config.SPLIT_M * 0
-        q0_smem, q0_bar, q_producer = q_producer.acquire()
-        issue_async_tma_load(q0_smem, q0_bar, desc_q, q0_offset)
+        with pl.scope("q0_load"):
+            q0_offset = prog.qo_offset_y + config.SPLIT_M * 0
+            q0_smem, q0_bar, q_producer = q_producer.acquire()
+            issue_async_tma_load(q0_smem, q0_bar, desc_q, q0_offset)
 
-        offsetkv_y = prog.offset_y + lo
-        k_smem, k_bar, kv_producer = kv_producer.acquire()
-        issue_async_tma_load(k_smem, k_bar, desc_k, offsetkv_y)
-
-        q1_offset = prog.qo_offset_y + config.SPLIT_M * 1
-        q1_smem, q1_bar, q_producer = q_producer.acquire()
-        issue_async_tma_load(q1_smem, q1_bar, desc_q, q1_offset)
-
-        v_smem, v_bar, kv_producer = kv_producer.acquire()
-        issue_async_tma_load(v_smem, v_bar, desc_v, offsetkv_y)
-
-        for start_n in range(lo + config.BLOCK_N, hi, config.BLOCK_N):
-            offsetkv_y = prog.offset_y + start_n
+        with pl.scope("k_load"):
+            offsetkv_y = prog.offset_y + lo
             k_smem, k_bar, kv_producer = kv_producer.acquire()
             issue_async_tma_load(k_smem, k_bar, desc_k, offsetkv_y)
+
+        with pl.scope("q1_load"):
+            q1_offset = prog.qo_offset_y + config.SPLIT_M * 1
+            q1_smem, q1_bar, q_producer = q_producer.acquire()
+            issue_async_tma_load(q1_smem, q1_bar, desc_q, q1_offset)
+
+        with pl.scope("v_load"):
             v_smem, v_bar, kv_producer = kv_producer.acquire()
             issue_async_tma_load(v_smem, v_bar, desc_v, offsetkv_y)
+
+        with pl.scope("k_v_load"):
+            for start_n in range(lo + config.BLOCK_N, hi, config.BLOCK_N):
+                offsetkv_y = prog.offset_y + start_n
+                k_smem, k_bar, kv_producer = kv_producer.acquire()
+                issue_async_tma_load(k_smem, k_bar, desc_k, offsetkv_y)
+                v_smem, v_bar, kv_producer = kv_producer.acquire()
+                issue_async_tma_load(v_smem, v_bar, desc_v, offsetkv_y)
     pl.exit_scope("_attn_fwd_load")
 
 
