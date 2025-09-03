@@ -5,6 +5,8 @@ import pytest
 import itertools
 
 from triton.language.core import _aggregate as aggregate
+import triton.profiler as proton
+import triton.profiler.language as pl
 
 from triton.experimental import gluon
 from triton.experimental.gluon import language as gl
@@ -548,6 +550,7 @@ def _join_n(xs):
 
 @gluon.jit
 def _attn_fwd_load(config, chnls, descs, M, STAGE: gl.constexpr):
+    pl.enter_scope("_attn_fwd_load")
     q_chnl, kv_chnl, o_chnl, epi_chnl, s0_chnl, s1_chnl, c0_chnl, c1_chnl, exp_turnstile = chnls
     desc_q, desc_k, desc_v, desc_o = descs
 
@@ -580,10 +583,12 @@ def _attn_fwd_load(config, chnls, descs, M, STAGE: gl.constexpr):
             issue_async_tma_load(k_smem, k_bar, desc_k, offsetkv_y)
             v_smem, v_bar, kv_producer = kv_producer.acquire()
             issue_async_tma_load(v_smem, v_bar, desc_v, offsetkv_y)
+    pl.exit_scope()
 
 
 @gluon.jit
 def _attn_fwd_mma(config, chnls, descs, M, STAGE: gl.constexpr):
+    pl.enter_scope("_attn_fwd_mma")
     q_chnl, kv_chnl, o_chnl, epi_chnl, s0_chnl, s1_chnl, c0_chnl, c1_chnl, exp_turnstile = chnls
     desc_q, desc_k, desc_v, desc_o = descs
 
@@ -600,47 +605,55 @@ def _attn_fwd_mma(config, chnls, descs, M, STAGE: gl.constexpr):
         lo, hi = prog.get_fused_loop_bounds(STAGE)
         num_mmas = (hi - lo) // config.BLOCK_N
 
-        q0_smem, q0_bar, q_consumer = q_consumer.acquire()
-        k_smem, k_bar, kv_consumer = kv_consumer.acquire()
-        s0_tmem, s0_bar, s0_producer = s0_producer.acquire()
-        tcgen05_mma(q0_smem, k_smem.permute((1, 0)), s0_tmem, use_acc=False, mbarriers=[s0_bar])
-
-        q1_smem, q1_bar, q_consumer = q_consumer.acquire()
-        s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
-        tcgen05_mma(q1_smem, k_smem.permute((1, 0)), s1_tmem, use_acc=False, mbarriers=[s1_bar, k_bar])
-
-        v_smem, v_bar, kv_consumer = kv_consumer.acquire()
-        o0_tmem, o0_bar, o_producer = o_producer.acquire()
-        s0_tmem, s0_bar, s0_producer = s0_producer.acquire()
-        p0_tmem = _borrow_s_as_p(config, s0_tmem)
-        tcgen05_mma(p0_tmem, v_smem, o0_tmem, use_acc=False, mbarriers=[o0_bar])
-        o1_init = False
-
-        for _ in range(num_mmas - 1):
+        with pl.scope("s0_mma"):
+            q0_smem, q0_bar, q_consumer = q_consumer.acquire()
             k_smem, k_bar, kv_consumer = kv_consumer.acquire()
+            s0_tmem, s0_bar, s0_producer = s0_producer.acquire()
             tcgen05_mma(q0_smem, k_smem.permute((1, 0)), s0_tmem, use_acc=False, mbarriers=[s0_bar])
 
-            o1_tmem, o1_bar, o_producer = o_producer.acquire()
+        with pl.scope("s1_mma"):
+            q1_smem, q1_bar, q_consumer = q_consumer.acquire()
             s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
-            p1_tmem = _borrow_s_as_p(config, s1_tmem)
-            tcgen05_mma(p1_tmem, v_smem, o1_tmem, use_acc=o1_init, mbarriers=[o1_bar, v_bar])
-            o1_init = True
-
             tcgen05_mma(q1_smem, k_smem.permute((1, 0)), s1_tmem, use_acc=False, mbarriers=[s1_bar, k_bar])
 
+        with pl.scope("o0_mma"):
             v_smem, v_bar, kv_consumer = kv_consumer.acquire()
             o0_tmem, o0_bar, o_producer = o_producer.acquire()
             s0_tmem, s0_bar, s0_producer = s0_producer.acquire()
             p0_tmem = _borrow_s_as_p(config, s0_tmem)
-            tcgen05_mma(p0_tmem, v_smem, o0_tmem, mbarriers=[o0_bar])
+            tcgen05_mma(p0_tmem, v_smem, o0_tmem, use_acc=False, mbarriers=[o0_bar])
+        o1_init = False
+
+        for _ in range(num_mmas - 1):
+            with pl.scope("o0_mma"):
+                k_smem, k_bar, kv_consumer = kv_consumer.acquire()
+                tcgen05_mma(q0_smem, k_smem.permute((1, 0)), s0_tmem, use_acc=False, mbarriers=[s0_bar])
+
+            with pl.scope("o1_s1_mma"):
+                o1_tmem, o1_bar, o_producer = o_producer.acquire()
+                s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
+                p1_tmem = _borrow_s_as_p(config, s1_tmem)
+                tcgen05_mma(p1_tmem, v_smem, o1_tmem, use_acc=o1_init, mbarriers=[o1_bar, v_bar])
+                o1_init = True
+
+                tcgen05_mma(q1_smem, k_smem.permute((1, 0)), s1_tmem, use_acc=False, mbarriers=[s1_bar, k_bar])
+
+            with pl.scope("o0_mma"):
+                v_smem, v_bar, kv_consumer = kv_consumer.acquire()
+                o0_tmem, o0_bar, o_producer = o_producer.acquire()
+                s0_tmem, s0_bar, s0_producer = s0_producer.acquire()
+                p0_tmem = _borrow_s_as_p(config, s0_tmem)
+                tcgen05_mma(p0_tmem, v_smem, o0_tmem, mbarriers=[o0_bar])
 
         tcgen05_commit(q0_bar)
         tcgen05_commit(q1_bar)
 
-        o1_tmem, o1_bar, o_producer = o_producer.acquire()
-        s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
-        p1_tmem = _borrow_s_as_p(config, s1_tmem)
-        tcgen05_mma(p1_tmem, v_smem, o1_tmem, use_acc=o1_init, mbarriers=[o1_bar, v_bar, s0_bar, s1_bar])
+        with pl.scope("o1_mma"):
+            o1_tmem, o1_bar, o_producer = o_producer.acquire()
+            s1_tmem, s1_bar, s1_producer = s1_producer.acquire()
+            p1_tmem = _borrow_s_as_p(config, s1_tmem)
+            tcgen05_mma(p1_tmem, v_smem, o1_tmem, use_acc=o1_init, mbarriers=[o1_bar, v_bar, s0_bar, s1_bar])
+    pl.exit_scope()
 
 
 @gluon.jit
@@ -696,57 +709,62 @@ def _softmax_inner_loop(tile_id: gl.constexpr, config, prog,  #
     lo, hi = prog.get_loop_bounds(STAGE)
 
     for start_n in range(lo, hi, config.BLOCK_N):
-        s_tmem, s_bar, s_consumer = s_consumer.acquire()
-        qk = _subtiled_qk_load(config, s_tmem)
+        with pl.scope("qk_load"):
+            s_tmem, s_bar, s_consumer = s_consumer.acquire()
+            qk = _subtiled_qk_load(config, s_tmem)
 
         if STAGE == 2:
-            col_limit_right = (offs_m - start_n + 1)[:, None]
-            qk = _apply_causal_mask(qk, col_limit_right)
+            with pl.scope("causal_mask"):
+                col_limit_right = (offs_m - start_n + 1)[:, None]
+                qk = _apply_causal_mask(qk, col_limit_right)
 
-        m_ij = gl.maximum(m_i, gl.max(qk, 1) * config.qk_scale)
-        alpha = gl.exp2(m_i - m_ij)
+        with pl.scope("softmax_rowmax"):
+            m_ij = gl.maximum(m_i, gl.max(qk, 1) * config.qk_scale)
+            alpha = gl.exp2(m_i - m_ij)
 
-        alpha_tmem = _borrow_s_as_alpha(config, s_tmem)
-        alpha_tmem.store(gl.convert_layout(alpha.expand_dims(1), config.alpha_2d_layout))
-        mbarrier.arrive(corr_bar, count=1)
+            alpha_tmem = _borrow_s_as_alpha(config, s_tmem)
+            alpha_tmem.store(gl.convert_layout(alpha.expand_dims(1), config.alpha_2d_layout))
+            mbarrier.arrive(corr_bar, count=1)
 
-        if config.use_ffma2_scale_rowmax:
-            qk = _fma_f32x2(qk, gl.full_like(qk, config.qk_scale), -m_ij[:, None])
-        else:
-            qk = _mul_f32x2(qk, gl.full_like(qk, config.qk_scale))
-            qk = _add_f32x2(qk, -m_ij[:, None])
+            if config.use_ffma2_scale_rowmax:
+                qk = _fma_f32x2(qk, gl.full_like(qk, config.qk_scale), -m_ij[:, None])
+            else:
+                qk = _mul_f32x2(qk, gl.full_like(qk, config.qk_scale))
+                qk = _add_f32x2(qk, -m_ij[:, None])
 
-        # Force the softmax partitions to take turns in the EX2 section. This
-        # prevents contention for the EX2 unit and improves utilization.
-        if config.use_exp2_turnstile:
-            _, exp_bar, exp_turnstile = exp_turnstile.acquire()
+        with pl.scope("softmax_exp2"):
+            # Force the softmax partitions to take turns in the EX2 section. This
+            # prevents contention for the EX2 unit and improves utilization.
+            if config.use_exp2_turnstile:
+                _, exp_bar, exp_turnstile = exp_turnstile.acquire()
 
-        # FIXME: When using FADD2 reductions, ptxas misbehaves and spills far
-        # below the register limit in the FADD2, FMUL2, EX2 section. Subtile by
-        # 4 to minimize the spilling.
-        p_tmem = _borrow_s_as_p(config, s_tmem)
-        p = _compute_and_store_exp2(config, qk, p_tmem)
+            # FIXME: When using FADD2 reductions, ptxas misbehaves and spills far
+            # below the register limit in the FADD2, FMUL2, EX2 section. Subtile by
+            # 4 to minimize the spilling.
+            p_tmem = _borrow_s_as_p(config, s_tmem)
+            p = _compute_and_store_exp2(config, qk, p_tmem)
 
-        mbarrier.arrive(s_bar, count=1)
-        _, corr_bar, corr_producer = corr_producer.acquire()
+            mbarrier.arrive(s_bar, count=1)
+            _, corr_bar, corr_producer = corr_producer.acquire()
 
         if config.use_exp2_turnstile:
             mbarrier.arrive(exp_bar, count=1)
 
-        if config.use_fadd2_reduce:
-            p0, p1 = _split_n(p)
-            l_ij0, l_ij1 = gl.reduce((p0, p1), axis=1, combine_fn=_reduce_fadd2)
-            # This is a difference of 1 SASS instruction but it dramatically
-            # affects instruction scheduling.
-            alpha = gl.convert_layout(alpha, l_i0.type.layout, assert_trivial=True)
-            if config.dtype == gl.float8e5:
-                l_i0, l_i1 = _pairwise_fma_f32x2(l_i0, alpha, l_ij0, l_i1, alpha, l_ij1)
+        with pl.scope("softmax_reduce"):
+            if config.use_fadd2_reduce:
+                p0, p1 = _split_n(p)
+                l_ij0, l_ij1 = gl.reduce((p0, p1), axis=1, combine_fn=_reduce_fadd2)
+                # This is a difference of 1 SASS instruction but it dramatically
+                # affects instruction scheduling.
+                alpha = gl.convert_layout(alpha, l_i0.type.layout, assert_trivial=True)
+                if config.dtype == gl.float8e5:
+                    l_i0, l_i1 = _pairwise_fma_f32x2(l_i0, alpha, l_ij0, l_i1, alpha, l_ij1)
+                else:
+                    l_i0 = l_i0 * alpha + l_ij0
+                    l_i1 = l_i1 * alpha + l_ij1
             else:
-                l_i0 = l_i0 * alpha + l_ij0
-                l_i1 = l_i1 * alpha + l_ij1
-        else:
-            l_ij = gl.sum(p, axis=1)
-            l_i0 = l_i0 * alpha + l_ij
+                l_ij = gl.sum(p, axis=1)
+                l_i0 = l_i0 * alpha + l_ij
 
         m_i = m_ij
 
@@ -779,13 +797,15 @@ def _softmax_tile(tile_id: gl.constexpr, config, M, desc_o, STAGE: gl.constexpr,
             l_i1 = 0
 
         if STAGE & 1:
-            m_i, l_i0, l_i1, corr_bar, s_consumer, corr_producer, exp_turnstile = _softmax_inner_loop(  #
-                tile_id, config, prog, s_consumer, corr_producer, exp_turnstile, corr_bar,  #
-                offs_m, m_i, l_i0, l_i1, STAGE=4 - STAGE)
+            with pl.scope("softmax_stage1"):
+                m_i, l_i0, l_i1, corr_bar, s_consumer, corr_producer, exp_turnstile = _softmax_inner_loop(  #
+                    tile_id, config, prog, s_consumer, corr_producer, exp_turnstile, corr_bar,  #
+                    offs_m, m_i, l_i0, l_i1, STAGE=4 - STAGE)
         if STAGE & 2:
-            m_i, l_i0, l_i1, corr_bar, s_consumer, corr_producer, exp_turnstile = _softmax_inner_loop(  #
-                tile_id, config, prog, s_consumer, corr_producer, exp_turnstile, corr_bar,  #
-                offs_m, m_i, l_i0, l_i1, STAGE=2)
+            with pl.scope("softmax_stage2"):
+                m_i, l_i0, l_i1, corr_bar, s_consumer, corr_producer, exp_turnstile = _softmax_inner_loop(  #
+                    tile_id, config, prog, s_consumer, corr_producer, exp_turnstile, corr_bar,  #
+                    offs_m, m_i, l_i0, l_i1, STAGE=2)
 
         if config.use_fadd2_reduce:
             l_i = l_i0 + l_i1
@@ -807,18 +827,21 @@ def _softmax_tile(tile_id: gl.constexpr, config, M, desc_o, STAGE: gl.constexpr,
 def _attn_fwd_softmax0(config, chnls, descs, M, STAGE: gl.constexpr):
     q_chnl, kv_chnl, o_chnl, epi_chnl, s0_chnl, s1_chnl, c0_chnl, c1_chnl, exp_turnstile = chnls
     desc_q, desc_k, desc_v, desc_o = descs
-    _softmax_tile(0, config, M, desc_o, STAGE, s0_chnl, c0_chnl, exp_turnstile.create_producer())
+    with pl.scope("attn_fwd_softmax0"):
+        _softmax_tile(0, config, M, desc_o, STAGE, s0_chnl, c0_chnl, exp_turnstile.create_producer())
 
 
 @gluon.jit
 def _attn_fwd_softmax1(config, chnls, descs, M, STAGE: gl.constexpr):
     q_chnl, kv_chnl, o_chnl, epi_chnl, s0_chnl, s1_chnl, c0_chnl, c1_chnl, exp_turnstile = chnls
     desc_q, desc_k, desc_v, desc_o = descs
-    _softmax_tile(1, config, M, desc_o, STAGE, s1_chnl, c1_chnl, exp_turnstile.create_consumer())
+    with pl.scope("attn_fwd_softmax1"):
+        _softmax_tile(1, config, M, desc_o, STAGE, s1_chnl, c1_chnl, exp_turnstile.create_consumer())
 
 
 @gluon.jit
 def _attn_fwd_epilogue(config, chnls, descs, M, STAGE: gl.constexpr):
+    pl.enter_scope("_attn_fwd_epilogue")
     q_chnl, kv_chnl, o_chnl, epi_chnl, s0_chnl, s1_chnl, c0_chnl, c1_chnl, exp_turnstile = chnls
     desc_q, desc_k, desc_v, desc_o = descs
 
@@ -828,15 +851,20 @@ def _attn_fwd_epilogue(config, chnls, descs, M, STAGE: gl.constexpr):
         prog = scheduler.get_program(pid)
 
         o0_smem, o0_bar, epi_consumer = epi_consumer.acquire()
+        pl.enter_scope("copy_o0")
         tma.async_copy_shared_to_global(desc_o, [prog.qo_offset_y + config.SPLIT_M * 0, 0], o0_smem)
 
         o1_smem, o1_bar, epi_consumer = epi_consumer.acquire()
+        pl.enter_scope("copy_o1")
         tma.async_copy_shared_to_global(desc_o, [prog.qo_offset_y + config.SPLIT_M * 1, 0], o1_smem)
 
         tma.store_wait(1)
+        pl.exit_scope("copy_o0")
         mbarrier.arrive(o0_bar, count=1)
         tma.store_wait(0)
+        pl.exit_scope("copy_o1")
         mbarrier.arrive(o1_bar, count=1)
+    pl.exit_scope()
 
 
 @gluon.jit
